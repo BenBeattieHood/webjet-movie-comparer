@@ -1,0 +1,17 @@
+# List all movies from CinemaWorld (query-all)
+GET https://webjetapitest.azurewebsites.net/api/cinemaworld/movies
+x-access-token:sjd1HfkjU83ksdsm3802k
+
+# List all movies from FilmWorld (query-all)
+GET https://webjetapitest.azurewebsites.net/api/filmworld/movies
+x-access-token:sjd1HfkjU83ksdsm3802k
+
+# Get a specific movie from CinemaWorld (query-single)
+# https://webjetapitest.azurewebsites.net/api/cinemaworld/movie/{ID}
+GET https://webjetapitest.azurewebsites.net/api/cinemaworld/movie/cw0076759
+x-access-token:sjd1HfkjU83ksdsm3802k
+
+# Get a specific movie from FilmWorld (query-single)
+# https://webjetapitest.azurewebsites.net/api/filmworld/movie/{ID}
+GET https://webjetapitest.azurewebsites.net/api/filmworld/movie/fw0076759
+x-access-token:sjd1HfkjU83ksdsm3802k
