@@ -1,0 +1,23 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "FNM Environment Setup",
+            "type": "shell",
+            "command": "fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression"
+        },
+        {
+            "label": "FNM Node Use",
+            "type": "shell",
+            "command": "fnm use"
+        },
+        {
+            "label": "PowerShell Environment Setup",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "FNM Environment Setup",
+                "FNM Node Use"
+            ]
+        }
+    ]
+}
