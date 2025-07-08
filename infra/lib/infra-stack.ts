@@ -10,6 +10,9 @@ import * as budgets from 'aws-cdk-lib/aws-budgets';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as cloudwatch_targets from 'aws-cdk-lib/aws-cloudwatch-targets';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 
 export class InfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -65,7 +68,7 @@ export class InfraStack extends cdk.Stack {
     // Lambda Function
     const lambdaFn = new lambda.Function(this, 'MovieComparerProcessor', {
       runtime: lambda.Runtime.DOTNET_8,
-      handler: 'MovieComparerProcessor::MovieComparerProcessor.Function::FunctionHandler',
+      handler: 'MovieComparerProcessor::MovieComparerProcessor.QueueWorkerFunction::FunctionHandler',
       code: lambda.Code.fromAsset('../backend/MovieComparerProcessor/src/MovieComparerProcessor/bin/Release/net8.0'),
       environment: {
         QUEUE_URL: queue.queueUrl,
@@ -232,6 +235,28 @@ export class InfraStack extends cdk.Stack {
     );
     new cdk.CfnOutput(this, 'DashboardUrl', {
       value: `https://console.aws.amazon.com/cloudwatch/home?region=${cdk.Stack.of(this).region}#dashboards:name=${dashboard.dashboardName}`
+    });
+
+    // Lambda to check DynamoDB activity and trigger 'request all' if needed
+    const checkDynamoActivityFn = new lambda.Function(this, 'CheckDynamoActivity', {
+      runtime: lambda.Runtime.DOTNET_8,
+      handler: 'MovieComparerProcessor::MovieComparerProcessor.CheckDynamoActivity::FunctionHandler',
+      code: lambda.Code.fromAsset('../backend/MovieComparerProcessor/src/MovieComparerProcessor/bin/Release/net8.0'),
+      environment: {
+        TABLE_NAME: movieSummaryDynamoTable.tableName,
+        QUEUE_URL: queue.queueUrl
+      },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      logRetention: logs.RetentionDays.ONE_WEEK
+    });
+    movieSummaryDynamoTable.grantReadData(checkDynamoActivityFn);
+    queue.grantSendMessages(checkDynamoActivityFn);
+
+    // Schedule: run daily
+    new events.Rule(this, 'CheckDynamoActivitySchedule', {
+      schedule: events.Schedule.cron({ minute: '0', hour: '0' }), // every day at midnight UTC
+      targets: [new targets.LambdaFunction(checkDynamoActivityFn)]
     });
 
     // Outputs
