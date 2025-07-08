@@ -14,6 +14,8 @@ using Amazon.SQS;
 using Amazon.SQS.Model;
 using Amazon.SecretsManager;
 using Amazon.SecretsManager.Model;
+using System.Collections.Generic;
+using System.Linq;
 
 // Assembly attribute to enable the Lambda function's JSON input to be converted into a .NET class.
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
@@ -132,19 +134,21 @@ public class Function
         if (movie?.Movie == null) throw new Exception("No movie found in response");
         // Compute MD5 hash of title
         var titleHash = BitConverter.ToString(MD5.HashData(Encoding.UTF8.GetBytes(movie.Movie.Title.ToUpper()))).Replace("-", "").ToLower();
-        // Update DynamoDB
+        // Update DynamoDB (merge with existing)
         var table = Table.LoadTable(_ddbClient, _movieSummaryDynamoTableName); // Table name from env
-        var doc = new Document
-        {
-            ["title"] = movie.Movie.Title,
-            ["titleHash"] = titleHash,
-            ["smallImageUrl"] = movie.Movie.Poster,
-            [msg.Provider.ToLower() + "Price"] = movie.Movie.Price,
-            ["genre"] = movie.Movie.Genre,
-            ["rating"] = movie.Movie.Rating,
-            ["released"] = movie.Movie.Released,
-            ["metascore"] = movie.Movie.Metascore
-        };
+        Document? existing = null;
+        try { existing = await table.GetItemAsync(movie.Movie.Title); } catch { }
+        var doc = existing ?? new Document();
+        doc["title"] = movie.Movie.Title;
+        doc["titleHash"] = titleHash;
+        if (!string.IsNullOrEmpty(movie.Movie.Poster)) doc["smallImageUrl"] = movie.Movie.Poster;
+        if (!string.IsNullOrEmpty(movie.Movie.Genre)) doc["genre"] = movie.Movie.Genre;
+        if (!string.IsNullOrEmpty(movie.Movie.Rating)) doc["rating"] = movie.Movie.Rating;
+        if (!string.IsNullOrEmpty(movie.Movie.Released)) doc["released"] = movie.Movie.Released;
+        if (!string.IsNullOrEmpty(movie.Movie.Metascore)) doc["metascore"] = movie.Movie.Metascore;
+        // Merge prices array
+        var prices = FunctionHelpers.MergePrices(doc, msg.Provider, movie.Movie.Price);
+        doc["prices"] = DynamoDBEntryConversion.ToEntry(prices);
         await table.PutItemAsync(doc);
         // Update S3 (conditional write)
         var s3Key = $"{titleHash}.json";
@@ -190,6 +194,52 @@ public class Function
     }
 }
 
+public static class FunctionHelpers
+{
+    public static List<PriceEntry> MergePrices(Document doc, string provider, decimal price)
+    {
+        var prices = new List<PriceEntry>();
+        if (doc.ContainsKey("prices") && doc["prices"] is DynamoDBList dynList)
+        {
+            foreach (var entry in dynList)
+            {
+                if (entry is DynamoDBMap map)
+                {
+                    var p = new PriceEntry
+                    {
+                        Provider = map["provider"].AsString(),
+                        Price = map.ContainsKey("price") ? decimal.Parse(map["price"].AsPrimitive().Value.ToString()) : 0,
+                        LastUpdated = map.ContainsKey("lastUpdated") ? DateTime.Parse(map["lastUpdated"].AsPrimitive().Value.ToString()) : DateTime.MinValue
+                    };
+                    prices.Add(p);
+                }
+            }
+        }
+        var now = DateTime.UtcNow;
+        var found = false;
+        foreach (var p in prices)
+        {
+            if (p.Provider.ToLower() == provider.ToLower())
+            {
+                p.Price = price;
+                p.LastUpdated = now;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            prices.Add(new PriceEntry
+            {
+                Provider = provider,
+                Price = price,
+                LastUpdated = now
+            });
+        }
+        return prices;
+    }
+}
+
 public class QueueMessage
 {
     public string Type { get; set; } = string.Empty;
@@ -202,3 +252,10 @@ public class MovieListResponse { public List<MovieSummary> Movies { get; set; } 
 public class MovieSummary { public string ID { get; set; } = string.Empty; public string Title { get; set; } = string.Empty; public string Poster { get; set; } = string.Empty; }
 public class MovieDetailResponse { public MovieDetail Movie { get; set; } = new(); }
 public class MovieDetail { public string ID { get; set; } = string.Empty; public string Title { get; set; } = string.Empty; public string Poster { get; set; } = string.Empty; public decimal Price { get; set; } public string Year { get; set; } = string.Empty; public string Rated { get; set; } = string.Empty; public string Released { get; set; } = string.Empty; public string Runtime { get; set; } = string.Empty; public string Genre { get; set; } = string.Empty; public string Director { get; set; } = string.Empty; public string Writer { get; set; } = string.Empty; public string Actors { get; set; } = string.Empty; public string Plot { get; set; } = string.Empty; public string Language { get; set; } = string.Empty; public string Country { get; set; } = string.Empty; public string Metascore { get; set; } = string.Empty; public string Rating { get; set; } = string.Empty; public string Votes { get; set; } = string.Empty; public string ImageUrl { get; set; } = string.Empty; }
+
+public class PriceEntry
+{
+    public string Provider { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+    public DateTime LastUpdated { get; set; }
+}

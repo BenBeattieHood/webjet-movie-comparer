@@ -1,14 +1,17 @@
-import { Suspense } from "react";
-import { sortOptionSchema } from "../../_lib/types";
-import { MovieList } from "./_components/movie-list";
-import { searchMovies } from "../../_lib/db/search-movies";
-import { z } from "zod";
-import { Pagination } from "../../_components/pagination";
-import { SearchForm } from "./_components/search-form";
-import { searchPageUrlParamsSchema } from "./_lib/url-params";
+import { Search, ChevronRight } from "lucide-react"
 
-export default async function Page({ searchParams }: { searchParams?: Promise<unknown> }) {
-    const parsedSearchParams = searchParams === undefined ? {} : searchPageUrlParamsSchema.parse(await searchParams);
+import { Button } from "@/components/generic/button"
+import { searchMovies } from "@/lib/db/search-movies"
+import { searchPageUrlParamsSchema } from "../../lib/url-params"
+import { getMovie } from "@/lib/db/get-movie"
+import { Header } from "@/components/header"
+import Link from "next/link"
+import { SearchForm } from "../../components/search-form"
+import { MoviesGrid } from "../../components/movies-grid"
+import { Hero } from "../../components/hero"
+
+export default async function Page({ searchParams }: { searchParams?: Promise<any> }) {
+    const parsedSearchParams = searchParams === undefined ? {} : searchPageUrlParamsSchema.parse({ ...(await searchParams) });
     const {
         sort,
         genre,
@@ -17,7 +20,7 @@ export default async function Page({ searchParams }: { searchParams?: Promise<un
         maxPrice,
         page = 1,
     } = parsedSearchParams;
-    const { movies, totalPages, genres } = await searchMovies({
+    const { movies } = await searchMovies({
         sort,
         genre,
         minRating,
@@ -25,15 +28,41 @@ export default async function Page({ searchParams }: { searchParams?: Promise<un
         maxPrice,
         page,
     });
-    // Here we let nextjs's default error handling take care of any issues with the searchMovies function
+
+    const featuredMovieHash = (movies.find((m) => m.isFeatured) ?? movies[0])?.titleHash;
+    const featuredMovie = (await getMovie(featuredMovieHash))!;
+
     return (
-        <main className="container mx-auto p-4">
-            <h1 className="text-2xl font-bold mb-4">Search Movies</h1>
-            <SearchForm genres={genres} />
-            <Suspense fallback={<div>Loading movies...</div>}>
-                <MovieList movies={movies} />
-            </Suspense>
-            <Pagination page={page} totalPages={totalPages} searchParams={parsedSearchParams} />
-        </main>
-    );
+        <div className="min-h-screen bg-background">
+            <Header />
+
+            <Hero {...featuredMovie}>
+                <div className="flex items-center gap-4">
+                    <Link href={`/movie/${featuredMovie.titleHash}`}>
+                        <Button size="lg" className="gap-2 bg-white text-black hover:bg-white/90">
+                            <Search className="h-4 w-4 fill-current" />
+                            View
+                        </Button>
+                    </Link>
+                </div>
+            </Hero>
+
+            <main className="container px-6 py-12">
+                <div className="flex items-center justify-between mb-8">
+                    <div>
+                        <h2 className="text-3xl font-bold mb-2">Popular Movies</h2>
+                        <p className="text-muted-foreground text-lg">Compare prices across the latest releases</p>
+                    </div>
+                    <Link href="/movies">
+                        <Button variant="ghost" className="gap-2 text-muted-foreground hover:text-foreground">
+                            View All
+                            <ChevronRight className="h-4 w-4" />
+                        </Button>
+                    </Link>
+                </div>
+
+                <MoviesGrid movies={movies} emptyStateSuggestion="Try adjusting your search or filters" />
+            </main>
+        </div>
+    )
 }
